@@ -13,9 +13,6 @@
 
 using namespace std;
 
-//TODO: check sudo give warning
-//TODO: convert to c++
-
 struct pseudo_header    //needed for checksum calculation
 {
 	unsigned int source_address;
